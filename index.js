@@ -16,6 +16,14 @@ app.use((req, res, next) => {
     next();
 });
 
+app.use('/',(req,res)=>{
+res.status(200).send({
+    "success":true,
+    "message":"Welcome to the Workout API"
+});
+})
+
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
     res.json({ 
