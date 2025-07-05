@@ -11,108 +11,71 @@ const DEFAULT_USER_ID = 'demo-user';
  * @query startDate - Start date for filtering (ISO format)
  * @query endDate - End date for filtering (ISO format)
  */
+// server/routes/workoutRoutes.js
 router.get('/summary', async (req, res) => {
     try {
-        const { startDate = '1970-01-01', endDate = new Date().toISOString() } = req.query;
-
         const summary = await Workout.aggregate([
             {
                 $match: {
-                    userId: DEFAULT_USER_ID,
-                    date: {
-                        $gte: new Date(startDate),
-                        $lte: new Date(endDate)
-                    }
+                    userId: process.env.DEFAULT_USER_ID || 'demo-user'
                 }
             },
-            { $unwind: '$exercises' },
-            { $unwind: '$exercises.stats' },
             {
                 $group: {
                     _id: {
-                        id: '$_id',
-                        exerciseName: '$exercises.name',
-                        muscleGroup: '$exercises.muscleGroup'
+                        date: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
+                        muscleGroup: '$muscleGroup',
+                        exerciseName: '$name',
+                        exerciseId: '$_id'
                     },
-                    totalSets: { $sum: { $size: '$exercises.stats.sets' } },
+                    totalSets: { $sum: { $size: '$stats' } },
                     totalVolume: {
                         $sum: {
                             $reduce: {
-                                input: '$exercises.stats.sets',
+                                input: '$stats',
                                 initialValue: 0,
                                 in: {
                                     $add: [
                                         '$$value',
-                                        { $multiply: ['$$this.reps', { $ifNull: ['$$this.weight', 0] }] }
+                                        {
+                                            $multiply: [
+                                                { $sum: '$$this.sets.reps' },
+                                                { $avg: '$$this.sets.weight' }
+                                            ]
+                                        }
                                     ]
                                 }
                             }
                         }
                     },
-                    exerciseStats: { 
-                        $push: {
-                            date: '$exercises.stats.date',
-                            sets: '$exercises.stats.sets',
-                            notes: '$exercises.stats.notes',
-                            rating: '$exercises.stats.rating',
-                            duration: '$exercises.stats.duration'
-                        }
-                    }
+                    stats: { $first: '$stats' }
                 }
             },
-            {
-                $project: {
-                    _id: 1,
-                    totalSets: 1,
-                    totalVolume: 1,
-                    exercise: {
-                        id: '$_id.exerciseId',
-                        name: '$_id.exerciseName',
-                        muscleGroup: '$_id.muscleGroup',
-                        totalSets: '$totalSets',
-                        totalVolume: '$totalVolume',
-                        stats: '$exerciseStats'
-                    }
-                }
-            },
-            // Group by date and muscle group
             {
                 $group: {
                     _id: {
                         date: '$_id.date',
                         muscleGroup: '$_id.muscleGroup'
                     },
-                    exercises: { 
+                    exercises: {
                         $push: {
-                            id: '$_id.id',
-                            name: '$exercise.name',
-                            muscleGroup: '$exercise.muscleGroup',
-                            totalSets: '$exercise.totalSets',
-                            totalVolume: '$exercise.totalVolume',
-                            stats: '$exercise.stats'
+                            id: '$_id.exerciseId',
+                            name: '$_id.exerciseName',
+                            totalSets: '$totalSets',
+                            totalVolume: '$totalVolume',
+                            stats: '$stats'  // Keep stats as array
                         }
                     }
                 }
             },
-            // Final group by date
             {
                 $group: {
                     _id: '$_id.date',
-                    // date: { $first: '$_id.date' },
+                    date: { $first: '$_id.date' },
                     muscleGroups: {
                         $push: {
                             name: '$_id.muscleGroup',
                             exercises: '$exercises'
-                        }
-                    },
-                    totalExercises: { $sum: { $size: '$exercises' } },
-                    totalVolume: { 
-                        $sum: {
-                            $reduce: {
-                                input: '$exercises',
-                                initialValue: 0,
-                                in: { $add: ['$$value', '$$this.totalVolume'] }
-                            }
                         }
                     }
                 }
@@ -120,21 +83,16 @@ router.get('/summary', async (req, res) => {
             { $sort: { _id: -1 } }
         ]);
 
-        res.json({
+        res.status(200).json({
             status: 'success',
-            data: summary,
-            meta: {
-                startDate,
-                endDate,
-                totalWorkouts: summary.length
-            }
+            data: summary
         });
     } catch (error) {
-        console.error('Error fetching workout summary:', error);
+        console.error('Error in /summary:', error);
         res.status(500).json({
             status: 'error',
             message: 'Failed to fetch workout summary',
-            error: process.env.NODE_ENV === 'development' ? error.message : {}
+            error: error.message
         });
     }
 });
@@ -272,21 +230,11 @@ router.put('/:exerciseId', async (req, res) => {
         if (!workout) {
             return res.status(404).json({
                 status: 'error',
-                message: 'Workout not found'
+                message: 'Exercise not found'
             });
         }
         
-        // Find the exercise in the workout
-        const exerciseToUpdate = workout.exercises.find(ex => 
-            ex.name.toLowerCase() === req.body.name?.toLowerCase()
-        );
-        console.log({ exerciseToUpdate });
-        if (!exerciseToUpdate) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'Exercise not found in the specified workout'
-            });
-        }
+
 
         // Format the date to compare just the date part (ignoring time)
         const statsDate = new Date(currentDate);
@@ -309,7 +257,7 @@ router.put('/:exerciseId', async (req, res) => {
         };
 
         // Check if stats already exist for this date
-        const statsIndex = exerciseToUpdate.stats.findIndex(stat => {
+        const statsIndex = workout.stats.findIndex(stat => {
             const statDate = new Date(stat.date);
             statDate.setHours(0, 0, 0, 0);
             return statDate.getTime() === statsDate.getTime();
@@ -317,10 +265,10 @@ router.put('/:exerciseId', async (req, res) => {
 
         if (statsIndex >= 0) {
             // Update existing stats
-            exerciseToUpdate.stats.set(statsIndex, newStats);
+            workout.stats.set(statsIndex, newStats);
         } else {
             // Add new stats
-            exerciseToUpdate.stats.push(newStats);
+            workout.stats.push(newStats);
         }
 
         // Save the updated workout
@@ -328,7 +276,7 @@ router.put('/:exerciseId', async (req, res) => {
         
         console.log('Exercise updated successfully:', { 
             workoutId: savedWorkout._id,
-            exerciseName: exerciseToUpdate.name
+            exerciseName: workout.name
         });
         
         return res.status(200).json({
