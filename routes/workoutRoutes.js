@@ -14,88 +14,52 @@ const DEFAULT_USER_ID = 'demo-user';
 // server/routes/workoutRoutes.js
 router.get('/summary', async (req, res) => {
     try {
-        const summary = await Workout.aggregate([
-            {
-                $match: {
-                    userId: process.env.DEFAULT_USER_ID || 'demo-user'
-                }
-            },
-            {
-                $group: {
-                    _id: {
-                        date: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
-                        muscleGroup: '$muscleGroup',
-                        exerciseName: '$name',
-                        exerciseId: '$_id'
-                    },
-                    totalSets: { $sum: { $size: '$stats' } },
-                    totalVolume: {
-                        $sum: {
-                            $reduce: {
-                                input: '$stats',
-                                initialValue: 0,
-                                in: {
-                                    $add: [
-                                        '$$value',
-                                        {
-                                            $multiply: [
-                                                { $sum: '$$this.sets.reps' },
-                                                { $avg: '$$this.sets.weight' }
-                                            ]
-                                        }
-                                    ]
-                                }
-                            }
-                        }
-                    },
-                    stats: { $first: '$stats' }
-                }
-            },
-            {
-                $group: {
-                    _id: {
-                        date: '$_id.date',
-                        muscleGroup: '$_id.muscleGroup'
-                    },
-                    exercises: {
-                        $push: {
-                            id: '$_id.exerciseId',
-                            name: '$_id.exerciseName',
-                            totalSets: '$totalSets',
-                            totalVolume: '$totalVolume',
-                            stats: '$stats'  // Keep stats as array
-                        }
-                    }
-                }
-            },
-            {
-                $group: {
-                    _id: '$_id.date',
-                    date: { $first: '$_id.date' },
-                    muscleGroups: {
-                        $push: {
-                            name: '$_id.muscleGroup',
-                            exercises: '$exercises'
-                        }
-                    }
-                }
-            },
-            { $sort: { _id: -1 } }
-        ]);
-
-        res.status(200).json({
-            status: 'success',
-            data: summary
+      const workouts = await Workout.find({
+        userId: process.env.DEFAULT_USER_ID || 'demo-user'
+      });
+  
+      // Flatten exercises by muscle group
+      const muscleGroupMap = {};
+  
+      workouts.forEach(workout => {
+        const { _id, name, muscleGroup, stats } = workout;
+  
+        if (!muscleGroupMap[muscleGroup]) {
+          muscleGroupMap[muscleGroup] = [];
+        }
+  
+        muscleGroupMap[muscleGroup].push({
+          id: _id, // exercise document id
+          name,
+          muscleGroup,
+          stats
         });
+      });
+  
+      // Convert to array format
+      const muscleGroups = Object.entries(muscleGroupMap).map(
+        ([name, exercises]) => ({
+          name,
+          exercises
+        })
+      );
+  
+      res.status(200).json({
+        status: 'success',
+        statusCode: 200,
+        muscleGroups
+      });
     } catch (error) {
-        console.error('Error in /summary:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to fetch workout summary',
-            error: error.message
-        });
+      console.error('Error in /summary:', error);
+      res.status(500).json({
+        status: 'error',
+        statusCode: 500,
+        message: 'Failed to fetch workout summary',
+        error: error.message
+      });
     }
-});
+  });
+  
 
 /**
  * @route POST /api/workouts
@@ -180,7 +144,7 @@ router.post('/', async (req, res) => {
             stats: [newStats]
         });
         const savedWorkout = await firstWorkout.save();
-        
+
         return res.status(201).json({
             status: 'success',
             message: 'New exercise stats added successfully',
@@ -233,13 +197,13 @@ router.put('/:exerciseId', async (req, res) => {
                 message: 'Exercise not found'
             });
         }
-        
+
 
 
         // Format the date to compare just the date part (ignoring time)
         const statsDate = new Date(currentDate);
         statsDate.setHours(0, 0, 0, 0);
-        
+
         // Prepare the new stats entry
         const newStats = {
             date: statsDate,
@@ -273,12 +237,12 @@ router.put('/:exerciseId', async (req, res) => {
 
         // Save the updated workout
         const savedWorkout = await workout.save();
-        
-        console.log('Exercise updated successfully:', { 
+
+        console.log('Exercise updated successfully:', {
             workoutId: savedWorkout._id,
             exerciseName: workout.name
         });
-        
+
         return res.status(200).json({
             status: 'success',
             message: 'Exercise stats updated successfully',
