@@ -95,3 +95,24 @@ const sendToken = (user, statusCode, res) => {
             }
         });
 };
+
+// In your authController.js
+exports.logout = async (req, res) => {
+    try {
+      const token = req.headers.authorization?.split(' ')[1];
+      if (!token) {
+        return res.status(400).json({ success: false, message: 'No token provided' });
+      }
+      
+      // Add token to blacklist (pseudocode)
+      await TokenBlacklist.create({ token, expiresAt: new Date(token.exp * 1000) });
+      
+      // Clear the refresh token cookie if using cookies
+      res.clearCookie('refreshToken');
+      
+      return res.json({ success: true, message: 'Logged out successfully' });
+    } catch (error) {
+      console.error('Logout error:', error);
+      return res.status(500).json({ success: false, message: 'Server error' });
+    }
+  };
