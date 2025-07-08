@@ -1,21 +1,24 @@
 const express = require('express');
 const router = express.Router();
 const Workout = require('../models/Workout');
+const { protect } = require('../middleware/auth');
 
-// Default user ID to use when authentication is bypassed
-const DEFAULT_USER_ID = 'demo-user';
+// Apply protect middleware to all routes
+router.use(protect);
 
 /**
- * @route GET /api/workouts/summary
+ * @route GET /api/v1/workouts/summary
  * @desc Get workout summary grouped by date, muscle group, and exercise
  * @query startDate - Start date for filtering (ISO format)
  * @query endDate - End date for filtering (ISO format)
  */
 // server/routes/workoutRoutes.js
-router.get('/summary', async (req, res) => {
+router.get('/summary', async (req, res, next) => {
+    console.log('Summary request - User ID:', req.user.id, 'Username:', req.user.username);
+    
     try {
       const workouts = await Workout.find({
-        userId: process.env.DEFAULT_USER_ID || 'demo-user'
+        userId: req.user.username
       });
   
       // Flatten exercises by muscle group
@@ -75,10 +78,11 @@ router.get('/summary', async (req, res) => {
  *   notes: string (optional)
  * }
  */
-router.post('/', async (req, res) => {
+router.post('/', async (req, res, next) => {
     try {
         const { name, muscleGroup, sets, notes, rating, duration } = req.body;
         const currentDate = new Date();
+        const userId = req.user.id;
 
         // Validate required fields
         if (!name || !muscleGroup || !Array.isArray(sets) || sets.length === 0) {
@@ -99,12 +103,12 @@ router.post('/', async (req, res) => {
         }
 
         // Find all workout documents for the user
-        let workouts = await Workout.find({ userId: DEFAULT_USER_ID });
+        let workouts = await Workout.find({ userId: req.user.id });
 
         // If no workouts exist, create one
         if (workouts.length === 0) {
             const newWorkout = new Workout({
-                userId: DEFAULT_USER_ID,
+                userId: req.user.id,
                 exercises: [],
                 notes: 'Workout Tracker',
                 completed: true
@@ -140,7 +144,8 @@ router.post('/', async (req, res) => {
         const firstWorkout = workouts[0];
         firstWorkout.exercises.push({
             name: name,
-            muscleGroup: muscleGroup.toLowerCase(),
+            muscleGroup: muscleGroup,
+            userId: userId,
             stats: [newStats]
         });
         const savedWorkout = await firstWorkout.save();
@@ -174,11 +179,12 @@ router.post('/', async (req, res) => {
  *   notes: string (optional)
  * }
  */
-router.put('/:exerciseId', async (req, res) => {
+router.put('/:exerciseId', async (req, res, next) => {
     try {
         const { exerciseId } = req.params;
         const { sets, notes, rating, duration } = req.body;
         const currentDate = new Date();
+        const userId = req.user.id;
 
         // Validate required fields
         if (!Array.isArray(sets) || sets.length === 0) {
@@ -188,10 +194,22 @@ router.put('/:exerciseId', async (req, res) => {
             });
         }
 
-        // Find the workout by ID
-        const workout = await Workout.findById(exerciseId);
-        console.log({ workout });
+        // Find the exercise within the user's workouts
+        const workout = await Workout.findOne({
+            'exercises._id': exerciseId,
+            userId: userId
+        });
+        
         if (!workout) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Exercise not found or not authorized'
+            });
+        }
+        
+        // Find the specific exercise
+        const exercise = workout.exercises.id(exerciseId);
+        if (!exercise) {
             return res.status(404).json({
                 status: 'error',
                 message: 'Exercise not found'
@@ -220,8 +238,8 @@ router.put('/:exerciseId', async (req, res) => {
             duration: duration || 0
         };
 
-        // Check if stats already exist for this date
-        const statsIndex = workout.stats.findIndex(stat => {
+        // Check if stats already exist for this date in the exercise
+        const statsIndex = exercise.stats.findIndex(stat => {
             const statDate = new Date(stat.date);
             statDate.setHours(0, 0, 0, 0);
             return statDate.getTime() === statsDate.getTime();
@@ -229,18 +247,21 @@ router.put('/:exerciseId', async (req, res) => {
 
         if (statsIndex >= 0) {
             // Update existing stats
-            workout.stats.set(statsIndex, newStats);
+            exercise.stats.set(statsIndex, newStats);
         } else {
             // Add new stats
-            workout.stats.push(newStats);
+            exercise.stats.push(newStats);
         }
 
+        // Mark the exercise as modified to ensure Mongoose saves the changes
+        workout.markModified('exercises');
+        
         // Save the updated workout
         const savedWorkout = await workout.save();
 
         console.log('Exercise updated successfully:', {
             workoutId: savedWorkout._id,
-            exerciseName: workout.name
+            exerciseName: exercise.name
         });
 
         return res.status(200).json({

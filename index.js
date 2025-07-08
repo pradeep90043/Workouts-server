@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const morgan = require('morgan');
 const workoutRoutes = require('./routes/workoutRoutes');
 const authRoutes = require('./routes/authRoutes');
 
@@ -21,11 +22,20 @@ app.use(cors({
 app.use(express.json());
 app.use(cookieParser());
 
-// Request logging
-app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
-    next();
-});
+// Request logging with morgan
+const requestLogFormat = ':date[iso] :method :url :status :response-time ms - :res[content-length]';
+
+// Log all requests to console
+app.use(morgan(requestLogFormat, {
+    skip: (req) => req.originalUrl === '/api/health' // Skip health check logs
+}));
+
+// Detailed request logging for development
+if (process.env.NODE_ENV === 'development') {
+    app.use(morgan('dev', {
+        skip: (req) => req.originalUrl === '/api/health'
+    }));
+}
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -38,7 +48,7 @@ app.get('/api/health', (req, res) => {
 
 // API Routes
 app.use('/api/v1/auth', authRoutes);
-app.use('/api/workouts', workoutRoutes);
+app.use('/api/v1/workouts', workoutRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
