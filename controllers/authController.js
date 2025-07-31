@@ -1,6 +1,6 @@
 const User = require('../models/User');
 const ErrorResponse = require('../utils/errorResponse');
-
+const seedExercisesForNewUser = require('../utils/cloneDemoUser');
 // Helper function to send error response
 const sendErrorResponse = (res, statusCode, message, errorCode = '') => {
     return res.status(statusCode).json({
@@ -47,13 +47,39 @@ exports.register = async (req, res, next) => {
             });
             console.log('User created successfully:', { id: user._id, email: user.email });
         } catch (createError) {
-            console.error('Error creating user:', createError);
-            if (createError.code === 11000) {
-                return sendErrorResponse(res, 400, 'Email already exists', 'DUPLICATE_EMAIL');
+            console.error('Error creating user:', {
+                name: createError.name,
+                message: createError.message,
+                code: createError.code,
+                keyPattern: createError.keyPattern,
+                keyValue: createError.keyValue,
+                errors: createError.errors,
+                stack: createError.stack
+            });
+            
+            if (createError.name === 'ValidationError') {
+                const messages = Object.values(createError.errors).map(val => val.message);
+                return sendErrorResponse(res, 400, messages.join(', '), 'VALIDATION_ERROR');
             }
-            return sendErrorResponse(res, 500, 'Error creating user account');
+            
+            if (createError.code === 11000) {
+                const field = Object.keys(createError.keyPattern)[0];
+                return sendErrorResponse(res, 400, `${field} already exists`, 'DUPLICATE_' + field.toUpperCase());
+            }
+            
+            return sendErrorResponse(res, 500, 'Error creating user account: ' + createError.message);
         }
 
+        // Seed demo exercises for new user (fire and forget)
+        try {
+            // Use username instead of _id to match the workout routes
+            await seedExercisesForNewUser(user.username);
+            console.log(`Successfully seeded exercises for user: ${user.username}`);
+        } catch (seedError) {
+            console.error('Error seeding exercises for new user:', seedError);
+            // Don't fail registration if seeding fails
+        }
+        
         // Send token response
         try {
             return sendToken(user, 201, res);

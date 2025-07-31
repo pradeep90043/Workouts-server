@@ -6,6 +6,7 @@ const cookieParser = require('cookie-parser');
 const morgan = require('morgan');
 const workoutRoutes = require('./routes/workoutRoutes');
 const authRoutes = require('./routes/authRoutes');
+const userDetails = require('./routes/userDetails');
 
 const app = express();
 
@@ -49,6 +50,7 @@ app.get('/api/health', (req, res) => {
 // API Routes
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/workouts', workoutRoutes);
+app.use('/api/v1/userDetails', userDetails);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
