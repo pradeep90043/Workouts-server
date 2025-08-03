@@ -7,7 +7,7 @@ const morgan = require('morgan');
 const workoutRoutes = require('./routes/workoutRoutes');
 const authRoutes = require('./routes/authRoutes');
 const userDetails = require('./routes/userDetails');
-
+const mealRoutes = require('./routes/mealRoutes');
 const app = express();
 
 // Middleware
@@ -51,6 +51,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/workouts', workoutRoutes);
 app.use('/api/v1/userDetails', userDetails);
+app.use('/api/v1/meal', mealRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
